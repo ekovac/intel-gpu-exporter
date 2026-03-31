@@ -2,57 +2,51 @@ from prometheus_client import start_http_server, Gauge
 import os
 import sys
 import subprocess
-import json
+import csv
 import logging
 
-ENGINES = ["Blitter", "Render/3D", "Video", "VideoEnhance", "Compute"]
-MODES = ["busy", "sema", "wait"]
+ENGINE_CSV_MAPPING = {
+        'RCS': 'Render/3D',
+        'BCS': 'Blitter',
+        'VCS': 'Video',
+        'VECS': 'VideoEnhance',
+        'CCS': 'Compute',
+}
+
+MODE_CSV_MAPPING = {
+        '%': 'busy',
+        'se': 'sema',
+        'wa': 'wait',
+}
 
 igpu_engines_ratio = Gauge(
     "igpu_engines_ratio", "utilization", ['engine', 'mode']
 )
 
-for engine in ENGINES:
-    for mode in MODES:
+for engine in ENGINE_CSV_MAPPING.values():
+    for mode in MODE_CSV_MAPPING.values():
         igpu_engines_ratio.labels(engine, mode)
 
 igpu_frequency_actual = Gauge("igpu_frequency_actual", "Frequency actual MHz")
 igpu_frequency_requested = Gauge("igpu_frequency_requested", "Frequency requested MHz")
 
-igpu_imc_bandwidth_reads = Gauge("igpu_imc_bandwidth_reads", "IMC reads MiB/s")
-igpu_imc_bandwidth_writes = Gauge("igpu_imc_bandwidth_writes", "IMC writes MiB/s")
+igpu_interrupts = Gauge("igpu_interrupt_rate", "Interrupts/s")
 
-igpu_interrupts = Gauge("igpu_interrupts", "Interrupts/s")
+igpu_rc6 = Gauge("igpu_rc6_ratio", "RC6 %")
 
-igpu_period = Gauge("igpu_period", "Period ms")
-
-igpu_power_gpu = Gauge("igpu_power_gpu", "GPU power W")
-igpu_power_package = Gauge("igpu_power_package", "Package power W")
-
-igpu_rc6 = Gauge("igpu_rc6", "RC6 %")
 
 
 def update(data):
-    for engine in ENGINES:
-        for mode in MODES:
-            datum = data.get("engines", {}).get(engine, {}).get(mode, 0.0)
-            print("{} {} {}".format(engine, mode, datum)) 
-            igpu_engines_ratio.labels(engine=engine, mode=mode).set(datum)
+    for engine_key, engine_name in ENGINE_CSV_MAPPING.items():
+        for mode_key, mode_name in MODE_CSV_MAPPING.items():
+            datum = data.get("{} {}".format(engine_key, mode_key))
+            igpu_engines_ratio.labels(engine=engine_name, mode=mode_name).set(datum)
 
-    igpu_frequency_actual.set(data.get("frequency", {}).get("actual", 0))
-    igpu_frequency_requested.set(data.get("frequency", {}).get("requested", 0))
+    igpu_frequency_actual.set(data.get("Freq MHz act"))
+    igpu_frequency_requested.set(data.get("Freq MHz req"))
+    igpu_interrupts.set(data.get("IRQ /s"))
 
-    igpu_imc_bandwidth_reads.set(data.get("imc-bandwidth", {}).get("reads", 0))
-    igpu_imc_bandwidth_writes.set(data.get("imc-bandwidth", {}).get("writes", 0))
-
-    igpu_interrupts.set(data.get("interrupts", {}).get("count", 0))
-
-    igpu_period.set(data.get("period", {}).get("duration", 0))
-
-    igpu_power_gpu.set(data.get("power", {}).get("GPU", 0))
-    igpu_power_package.set(data.get("power", {}).get("Package", 0))
-
-    igpu_rc6.set(data.get("rc6", {}).get("value", 0))
+    igpu_rc6.set(data.get("RC6 %"))
 
 
 if __name__ == "__main__":
@@ -68,37 +62,18 @@ if __name__ == "__main__":
     device = os.getenv("DEVICE")
 
     if device is not None:
-        cmd = "intel_gpu_top -J -s {} -d {}".format(int(period), device)
+        cmd = "intel_gpu_top -c -s {} -d {}".format(int(period), device)
     else:
-        cmd = "intel_gpu_top -J -s {}".format(int(period))
+        cmd = "intel_gpu_top -c -s {}".format(int(period))
 
     process = subprocess.Popen(
-        cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        cmd.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        encoding="utf-8"
     )
 
-    logging.info("Started " + cmd)
-    output = ""
-
-    if os.getenv("IS_DOCKER", False):
-        for line in process.stdout:
-            line = line.decode("utf-8").strip()
-            output += line
-
-            try:
-                data = json.loads(output.strip(","))
-                logging.debug(data)
-                update(data)
-                output = ""
-            except json.JSONDecodeError:
-                continue
-    else:
-        while process.poll() is None:
-            read = process.stdout.readline()
-            output += read.decode("utf-8")
-            logging.debug(output)
-            if read == b"},\n":
-                update(json.loads(output[:-2]))
-                output = ""
+    reader = csv.DictReader(process.stdout)
+    for row in reader:
+        update(row)
 
     process.kill()
 
