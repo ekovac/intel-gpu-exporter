@@ -5,45 +5,16 @@ import subprocess
 import json
 import logging
 
-igpu_engines_blitter_0_busy = Gauge(
-    "igpu_engines_blitter_0_busy", "Blitter 0 busy utilisation %"
-)
-igpu_engines_blitter_0_sema = Gauge(
-    "igpu_engines_blitter_0_sema", "Blitter 0 sema utilisation %"
-)
-igpu_engines_blitter_0_wait = Gauge(
-    "igpu_engines_blitter_0_wait", "Blitter 0 wait utilisation %"
+ENGINES = ["Blitter", "Render/3D", "Video", "VideoEnhance", "Compute"]
+MODES = ["busy", "sema", "wait"]
+
+igpu_engines_ratio = Gauge(
+    "igpu_engines_ratio", "utilization", ['engine', 'mode']
 )
 
-igpu_engines_render_3d_0_busy = Gauge(
-    "igpu_engines_render_3d_0_busy", "Render 3D 0 busy utilisation %"
-)
-igpu_engines_render_3d_0_sema = Gauge(
-    "igpu_engines_render_3d_0_sema", "Render 3D 0 sema utilisation %"
-)
-igpu_engines_render_3d_0_wait = Gauge(
-    "igpu_engines_render_3d_0_wait", "Render 3D 0 wait utilisation %"
-)
-
-igpu_engines_video_0_busy = Gauge(
-    "igpu_engines_video_0_busy", "Video 0 busy utilisation %"
-)
-igpu_engines_video_0_sema = Gauge(
-    "igpu_engines_video_0_sema", "Video 0 sema utilisation %"
-)
-igpu_engines_video_0_wait = Gauge(
-    "igpu_engines_video_0_wait", "Video 0 wait utilisation %"
-)
-
-igpu_engines_video_enhance_0_busy = Gauge(
-    "igpu_engines_video_enhance_0_busy", "Video Enhance 0 busy utilisation %"
-)
-igpu_engines_video_enhance_0_sema = Gauge(
-    "igpu_engines_video_enhance_0_sema", "Video Enhance 0 sema utilisation %"
-)
-igpu_engines_video_enhance_0_wait = Gauge(
-    "igpu_engines_video_enhance_0_wait", "Video Enhance 0 wait utilisation %"
-)
+for engine in ENGINES:
+    for mode in MODES:
+        igpu_engines_ratio.labels(engine, mode)
 
 igpu_frequency_actual = Gauge("igpu_frequency_actual", "Frequency actual MHz")
 igpu_frequency_requested = Gauge("igpu_frequency_requested", "Frequency requested MHz")
@@ -62,45 +33,11 @@ igpu_rc6 = Gauge("igpu_rc6", "RC6 %")
 
 
 def update(data):
-    igpu_engines_blitter_0_busy.set(
-        data.get("engines", {}).get("Blitter/0", {}).get("busy", 0.0)
-    )
-    igpu_engines_blitter_0_sema.set(
-        data.get("engines", {}).get("Blitter/0", {}).get("sema", 0.0)
-    )
-    igpu_engines_blitter_0_wait.set(
-        data.get("engines", {}).get("Blitter/0", {}).get("wait", 0.0)
-    )
-
-    igpu_engines_render_3d_0_busy.set(
-        data.get("engines", {}).get("Render/3D/0", {}).get("busy", 0.0)
-    )
-    igpu_engines_render_3d_0_sema.set(
-        data.get("engines", {}).get("Render/3D/0", {}).get("sema", 0.0)
-    )
-    igpu_engines_render_3d_0_wait.set(
-        data.get("engines", {}).get("Render/3D/0", {}).get("wait", 0.0)
-    )
-
-    igpu_engines_video_0_busy.set(
-        data.get("engines", {}).get("Video/0", {}).get("busy", 0.0)
-    )
-    igpu_engines_video_0_sema.set(
-        data.get("engines", {}).get("Video/0", {}).get("sema", 0.0)
-    )
-    igpu_engines_video_0_wait.set(
-        data.get("engines", {}).get("Video/0", {}).get("wait", 0.0)
-    )
-
-    igpu_engines_video_enhance_0_busy.set(
-        data.get("engines", {}).get("VideoEnhance/0", {}).get("busy", 0.0)
-    )
-    igpu_engines_video_enhance_0_sema.set(
-        data.get("engines", {}).get("VideoEnhance/0", {}).get("sema", 0.0)
-    )
-    igpu_engines_video_enhance_0_wait.set(
-        data.get("engines", {}).get("VideoEnhance/0", {}).get("wait", 0.0)
-    )
+    for engine in ENGINES:
+        for mode in MODES:
+            datum = data.get("engines", {}).get(engine, {}).get(mode, 0.0)
+            print("{} {} {}".format(engine, mode, datum)) 
+            igpu_engines_ratio.labels(engine=engine, mode=mode).set(datum)
 
     igpu_frequency_actual.set(data.get("frequency", {}).get("actual", 0))
     igpu_frequency_requested.set(data.get("frequency", {}).get("requested", 0))
@@ -127,7 +64,7 @@ if __name__ == "__main__":
 
     start_http_server(8080)
 
-    period = os.getenv("REFRESH_PERIOD_MS", 10000)
+    period = os.getenv("REFRESH_PERIOD_MS", 5000)
     device = os.getenv("DEVICE")
 
     if device is not None:
